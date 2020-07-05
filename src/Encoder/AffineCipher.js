@@ -5,7 +5,7 @@ import Encoder from '../Encoder'
 const meta = {
   name: 'affine-cipher',
   title: 'Affine cipher',
-  category: 'Substitution cipher',
+  category: 'Ciphers',
   type: 'encoder'
 }
 
@@ -37,93 +37,99 @@ export default class AffineCipherEncoder extends Encoder {
         name: 'a',
         type: 'number',
         label: 'Slope / a',
-        width: 6,
         value: 5,
+        integer: true,
+        min: 1,
         validateValue: this.validateSlopeValue.bind(this),
         randomizeValue: this.randomizeSlopeValue.bind(this),
-        options: {
-          integer: true,
-          min: 1
-        }
+        width: 6
       },
       {
         name: 'b',
         type: 'number',
         label: 'Intercept / b',
-        width: 6,
         value: 8,
+        integer: true,
+        min: 1,
         randomizeValue: this.randomizeInterceptValue.bind(this),
-        options: {
-          integer: true,
-          min: 1
-        }
+        width: 6
       },
       {
         name: 'alphabet',
-        type: 'alphabet',
+        type: 'text',
         value: defaultAlphabet,
-        randomizable: false
+        uniqueChars: true,
+        minLength: 2,
+        randomizable: false,
+        caseSensitivity: false
       },
       {
-        name: 'caseSensitivity',
-        type: 'boolean',
+        name: 'caseStrategy',
+        type: 'enum',
+        value: 'maintain',
+        elements: ['maintain', 'ignore', 'strict'],
+        labels: ['Maintain case', 'Ignore case', 'Strict (A ≠ a)'],
         width: 6,
-        value: false,
         randomizable: false
       },
       {
         name: 'includeForeignChars',
         type: 'boolean',
         label: 'Foreign Chars',
-        width: 6,
         value: true,
-        randomizable: false,
-        options: {
-          trueLabel: 'Include',
-          falseLabel: 'Ignore'
-        }
+        width: 6,
+        trueLabel: 'Include',
+        falseLabel: 'Ignore',
+        randomizable: false
       }
     ])
-  }
-
-  /**
-   * Triggered before performing encode or decode on given content.
-   * @protected
-   * @param {Chain} content
-   * @param {boolean} isEncode True for encoding, false for decoding
-   * @return {number[]|string|Uint8Array|Chain|Promise} Filtered content
-   */
-  willTranslate (content, isEncode) {
-    return !this.getSettingValue('caseSensitivity')
-      ? content.toLowerCase()
-      : content
   }
 
   /**
    * Performs encode or decode on given content.
    * @param {Chain} content
    * @param {boolean} isEncode True for encoding, false for decoding
-   * @return {number[]|string|Uint8Array|Chain|Promise} Resulting content
+   * @return {number[]|string|Uint8Array|Chain} Resulting content
    */
   performTranslate (content, isEncode) {
-    const { a, b, alphabet, includeForeignChars } = this.getSettingValues()
+    const { a, b, caseStrategy, includeForeignChars } = this.getSettingValues()
+
+    // Prepare alphabet(s) depending on chosen case strategy
+    let alphabet = this.getSettingValue('alphabet')
+    let uppercaseAlphabet
+    if (caseStrategy !== 'strict') {
+      alphabet = alphabet.toLowerCase()
+      uppercaseAlphabet = alphabet.toUpperCase()
+    }
 
     const m = alphabet.getLength()
     const n = content.getLength()
     const result = new Array(n).fill(0)
 
-    let codePoint, i, c, x, y
+    let codePoint, uppercase, i, c, x, y
+    let j = 0
+
     for (i = 0; i < n; i++) {
       codePoint = content.getCodePointAt(i)
 
+      // Match alphabet character
       x = alphabet.indexOfCodePoint(codePoint)
+      uppercase = false
+
+      // Match uppercase alphabet character (depending on case strategy)
+      if (x === -1 && caseStrategy !== 'strict') {
+        x = uppercaseAlphabet.indexOfCodePoint(codePoint)
+        uppercase = true
+      }
+
       if (x === -1) {
         // Character not in alphabet
         if (includeForeignChars) {
           // Take over character unchanged
-          result[i] = codePoint
+          result[j++] = codePoint
         }
       } else {
+        // Translate character index through linear function
         if (isEncode) {
           // E(x) = (ax + b) mod m
           y = MathUtil.mod(a * x + b, m)
@@ -132,11 +138,17 @@ export default class AffineCipherEncoder extends Encoder {
           c = MathUtil.xgcd(a, m)[0]
           y = MathUtil.mod(c * (x - b), m)
         }
-        result[i] = alphabet.getCodePointAt(y)
+
+        // Put index back into a character following the case strategy
+        if (caseStrategy === 'maintain' && uppercase) {
+          result[j++] = uppercaseAlphabet.getCodePointAt(y)
+        } else {
+          result[j++] = alphabet.getCodePointAt(y)
+        }
       }
     }
 
-    return result
+    return result.slice(0, j)
   }
 
   /**
@@ -151,12 +163,10 @@ export default class AffineCipherEncoder extends Encoder {
         // Changing the alphabet setting value can invalidate the slope setting
         this.getSetting('a').revalidateValue()
         break
-      case 'caseSensitivity':
-        // Also set case sensitivity on the alphabet setting
-        this.getSetting('alphabet').setCaseSensitivity(value)
+      case 'caseStrategy':
+        this.getSetting('alphabet').setCaseSensitivity(value === 'strict')
         break
     }
-    super.settingValueDidChange(setting, value)
   }
 
   /**

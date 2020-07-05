@@ -1,24 +1,21 @@
 
+const { src, dest, parallel, series, watch } = require('gulp')
 const autoprefixer = require('gulp-autoprefixer')
 const babel = require('rollup-plugin-babel')
 const cleanCSS = require('gulp-clean-css')
-const clone = require('gulp-clone')
 const commonJs = require('rollup-plugin-commonjs')
-const concat = require('gulp-concat')
 const del = require('del')
-const gulp = require('gulp')
 const header = require('gulp-header')
 const mocha = require('gulp-mocha')
 const nodeResolve = require('rollup-plugin-node-resolve')
 const rename = require('gulp-rename')
 const revision = require('git-rev-sync')
 const rollup = require('gulp-better-rollup')
+const rollupReplace = require('@rollup/plugin-replace')
 const sass = require('gulp-sass')
-const sassSVGInliner = require('sass-inline-svg')
 const sourcemaps = require('gulp-sourcemaps')
 const standard = require('gulp-standard')
-const streamQueue = require('streamqueue')
-const uglify = require('gulp-uglify')
+const terser = require('gulp-terser')
 
 const meta = require('./package.json')
 const paths = {
@@ -30,77 +27,97 @@ const paths = {
   test: './test'
 }
 
-// try to retrieve current commit hash
-let distRevision
-try {
-  distRevision = revision.long()
-} catch (err) {
-  distRevision = 'unknown'
+function composeVersion () {
+  try {
+    // Include branch and commit as build metadata
+    const branch = revision.branch().replace(/[^0-9A-Za-z-]+/g, '-')
+    return `${meta.version}+${branch}.${revision.short()}`
+  } catch (err) {
+    // Git revision details not available, only return package version
+    return meta.version
+  }
 }
 
-// compose dist header
-const distHeader =
-  `/*! ${meta.name} v${meta.version} (commit ${distRevision})` +
-  ` - (c) ${meta.author} */\n`
+/**
+ * Injects a dist header featuring the package name, version and copyright
+ * notice into every file in the pipe.
+ * @return {function}
+ */
+function injectDistHeader () {
+  const version = `v${composeVersion()}`
+  const year = new Date().getFullYear()
+  return header(`/*! ${meta.name} ${version} - (c) ${meta.author} ${year} */\n`)
+}
 
-gulp.task('script-clean', () => {
+/**
+ * Renames all files in the pipe such that `index` gets replaced
+ * by the package name.
+ * @return {function}
+ */
+function renameIndexToPackage() {
+  return rename(path => {
+    path.basename = path.basename.replace('index', meta.name)
+  })
+}
+
+function scriptClean () {
   return del([paths.scriptDist])
-})
+}
 
-gulp.task('script-test-lint', () => {
-  return gulp.src(paths.test + '/**/*.js')
+function scriptTestLint () {
+  return src(paths.test + '/**/*.js')
     .pipe(standard())
     .pipe(standard.reporter('default', {
       breakOnError: true,
       quiet: true
     }))
-})
+}
 
-gulp.task('script-test', () => {
-  return gulp.src(paths.test + '/**/*.js', { read: false })
+function scriptTest () {
+  return src(paths.test + '/**/*.js', { read: false })
     .pipe(mocha({
       reporter: 'dot',
       require: [
-        'babel-core/register',
-        'babel-polyfill'
+        '@babel/register'
       ]
     }))
-})
+}
 
-gulp.task('script-lint', () => {
-  return gulp.src(paths.script + '/**/*.js')
+function scriptLint () {
+  return src(paths.script + '/index*.js')
     .pipe(standard())
     .pipe(standard.reporter('default', {
       breakOnError: true,
       quiet: true
     }))
-})
+}
 
-gulp.task('script', () => {
-  const appStream = gulp.src(paths.script + '/index.js')
+function script () {
+  return src(paths.script + '/index*.js')
     .pipe(sourcemaps.init())
     .pipe(rollup({
       external: ['crypto'],
       plugins: [
+        rollupReplace({
+          CRYPTII_VERSION: JSON.stringify(composeVersion())
+        }),
         babel({
           babelrc: false,
           presets: [
-            ['env', {
-              loose: true,
-              modules: false
-            }]
+            [
+              '@babel/preset-env',
+              {
+                modules: false,
+                useBuiltIns: 'usage',
+                corejs: 3
+              }
+            ]
           ],
-          plugins: [
-            'external-helpers',
-            ['babel-plugin-transform-builtin-extend', {
-              globals: ['Error']
-            }]
-          ],
+          plugins: ['inline-svg'],
           exclude: ['node_modules/**']
         }),
         nodeResolve({
-          jsnext: true,
-          main: true
+          mainFields: ['module', 'main']
         }),
         commonJs({
           include: ['node_modules/**'],
@@ -109,120 +126,70 @@ gulp.task('script', () => {
       ]
     }, {
       format: 'umd',
+      strict: false,
       name: meta.name,
       globals: {
         crypto: 'crypto'
       }
     }))
-
-    // set output filename
-    .pipe(rename(`${meta.name}.js`))
-
-    // minify code
-    .pipe(uglify())
-
-    // append header
-    .pipe(header(distHeader))
-
-  // create polyfill stream from existing files
-  const polyfillStream = gulp.src([
-    './node_modules/dom4/build/dom4.js',
-    './node_modules/babel-polyfill/dist/polyfill.min.js'
-  ], { base: '.' })
-    .pipe(sourcemaps.init())
-
-  // compose library bundle
-  const libraryBundleStream = appStream.pipe(clone())
-    // render sourcemaps
+    .pipe(terser())
+    .pipe(renameIndexToPackage())
+    .pipe(injectDistHeader())
     .pipe(sourcemaps.write('.'))
+    .pipe(dest(paths.scriptDist))
+}
 
-  // compose browser bundle
-  const browserBundleStream =
-    streamQueue({ objectMode: true }, polyfillStream, appStream)
-      // concat polyfill and library
-      .pipe(concat(`${meta.name}-browser.js`))
-      // render sourcemaps
-      .pipe(sourcemaps.write('.'))
-
-  // save bundles and sourcemaps
-  const projectStream =
-    streamQueue({ objectMode: true }, libraryBundleStream, browserBundleStream)
-      .pipe(gulp.dest(paths.scriptDist))
-
-  return projectStream
-})
-
-gulp.task('style-clean', () => {
+function styleClean () {
   return del([paths.styleDist])
-})
+}
 
-gulp.task('style', () => {
-  return gulp.src(paths.style + '/main.scss')
-
-    // init sourcemaps
+function style () {
+  return src(paths.style + '/index*.scss')
     .pipe(sourcemaps.init())
-
-    // compile sass to css
     .pipe(
       sass({
         includePaths: ['node_modules'],
-        outputStyle: 'expanded',
-        functions: {
-          'inline-svg': sassSVGInliner(paths.assets)
-        }
+        outputStyle: 'expanded'
       })
         .on('error', sass.logError)
     )
-
-    // autoprefix css
-    .pipe(autoprefixer('last 2 version', 'ie 11', '> 1%'))
-
-    // minify
-    .pipe(cleanCSS({ processImport: false }))
-
-    // append header
-    .pipe(header(distHeader))
-
-    // save result
-    .pipe(rename(meta.name + '.css'))
+    .pipe(autoprefixer())
+    .pipe(cleanCSS())
+    .pipe(renameIndexToPackage())
+    .pipe(injectDistHeader())
     .pipe(sourcemaps.write('.'))
-    .pipe(gulp.dest(paths.styleDist))
-})
+    .pipe(dest(paths.styleDist))
+}
 
-gulp.task('watch', () => {
-  gulp.watch(paths.script + '/**/*.js', gulp.series(
-    'script-lint',
-    'script-test',
-    'script-clean',
-    'script'
-  ))
+// Task watch
+function watchFiles () {
+  watch(paths.script + '/**/*.js',
+    series(scriptLint, scriptTest, scriptClean, script))
+  watch(paths.test + '/**/*.js',
+    series(scriptTestLint, scriptTest, scriptLint, scriptClean, script))
+  watch(paths.style + '/**/*.scss',
+    series(styleClean, style))
+}
 
-  gulp.watch(paths.test + '/**/*.js', gulp.series(
-    'script-test-lint',
-    'script-test',
-    'script-lint',
-    'script-clean',
-    'script'
-  ))
+watchFiles.description =
+  'Watches style, src and test files and triggers partial builds upon changes'
+exports.watch = watchFiles
 
-  gulp.watch(paths.style + '/**/*.scss', gulp.series(
-    'style-clean',
-    'style'
-  ))
-})
+// Task test
+const test = series(parallel(scriptLint, scriptTestLint), scriptTest)
+test.description = 'Runs source code linters and package tests.'
+exports.test = test
 
-gulp.task('test', gulp.series(
-  gulp.parallel('script-lint', 'script-test-lint'),
-  'script-test'
-))
+// Task build
+const build = series(
+  test,
+  parallel(scriptClean, styleClean),
+  parallel(script, style)
+)
+build.description = 'Builds package into the `dist` folder when tests succeed.'
+exports.build = build
 
-gulp.task('build', gulp.series(
-  'test',
-  gulp.parallel('script-clean', 'style-clean'),
-  gulp.parallel('script', 'style')
-))
-
-gulp.task('default', gulp.series(
-  'build',
-  'watch'
-))
+// Default task
+const all = parallel(build, watchFiles)
+all.description = 'Tests and builds package initially and on file change'
+exports.default = all

@@ -67,14 +67,14 @@ export default class EncoderView extends BrickView {
    * @return {?HTMLElement}
    */
   renderContent () {
-    // generic encoder bricks have no content
+    // Generic encoder bricks have no content
     return null
   }
 
   actionDidClick (action, evt) {
     evt.preventDefault()
 
-    // check if encoder should be reversed
+    // Check if encoder should be reversed
     const reverse = action === 'decode'
     if (this.getModel().isReverse() !== reverse) {
       this.getModel().viewDidReverse(this)
@@ -86,13 +86,20 @@ export default class EncoderView extends BrickView {
    * @return {View} Fluent interface
    */
   update () {
-    // update action
+    // Update action
     const reverse = this.getModel().isReverse()
-    this._$encodeAction.classList.toggle('brick__action--active', !reverse)
-    this._$decodeAction &&
-      this._$decodeAction.classList.toggle('brick__action--active', reverse)
 
-    // update status
+    if (reverse) {
+      this._$encodeAction.classList.remove('brick__action--active')
+      this._$decodeAction &&
+        this._$decodeAction.classList.add('brick__action--active')
+    } else {
+      this._$encodeAction.classList.add('brick__action--active')
+      this._$decodeAction &&
+        this._$decodeAction.classList.remove('brick__action--active')
+    }
+
+    // Update status
     const error = this.getModel().getLastError()
     const translation = this.getModel().getLastTranslationMeta()
 
@@ -104,20 +111,13 @@ export default class EncoderView extends BrickView {
       if (translation.charCount !== null) {
         message +=
           `${translation.charCount} ` +
-          `${translation.charCount === 1 ? 'char' : 'chars'} `
+          `${translation.charCount === 1 ? 'char' : 'chars'}`
       } else {
         message +=
           `${translation.byteCount} ` +
-          `${translation.byteCount === 1 ? 'byte' : 'bytes'} `
+          `${translation.byteCount === 1 ? 'byte' : 'bytes'}`
       }
 
-      if (translation.duration < 10) {
-        message += `in ${parseInt(translation.duration * 100) / 100}ms`
-      } else if (translation.duration < 1000) {
-        message += `in ${parseInt(translation.duration)}ms`
-      } else {
-        message += `in ${parseInt(translation.duration / 1000)}s`
-      }
       return this.updateStatus(status, message)
     }
 

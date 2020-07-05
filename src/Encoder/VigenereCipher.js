@@ -6,7 +6,7 @@ import MathUtil from '../MathUtil'
 const meta = {
   name: 'vigenere-cipher',
   title: 'Vigenère cipher',
-  category: 'Substitution cipher',
+  category: 'Ciphers',
   type: 'encoder'
 }
 
@@ -34,57 +34,58 @@ export default class VigenereCipherEncoder extends Encoder {
         name: 'variant',
         type: 'enum',
         value: 'standard',
-        options: {
-          elements: [
-            'standard',
-            'beaufort-cipher',
-            'variant-beaufort-cipher',
-            'trithemius-cipher'
-          ],
-          labels: [
-            'Standard',
-            'Beaufort cipher',
-            'Variant Beaufort cipher',
-            'Trithemius cipher'
-          ]
-        }
+        elements: [
+          'standard',
+          'beaufort-cipher',
+          'variant-beaufort-cipher',
+          'trithemius-cipher'
+        ],
+        labels: [
+          'Standard Vigenère cipher',
+          'Beaufort cipher',
+          'Variant Beaufort cipher',
+          'Trithemius cipher'
+        ],
+        randomizable: false
       },
       {
         name: 'key',
         type: 'text',
         value: 'cryptii',
-        options: {
-          allowedChars: defaultAlphabet,
-          minLength: 2
-        }
+        whitelistChars: defaultAlphabet,
+        minLength: 2,
+        caseSensitivity: false
       },
       {
         name: 'keyMode',
         type: 'enum',
         value: 'repeat',
-        randomizable: false,
-        options: {
-          elements: [
-            'repeat',
-            'autokey'
-          ],
-          labels: [
-            'Repeat',
-            'Autokey'
-          ]
-        }
-      },
-      {
-        name: 'alphabet',
-        type: 'alphabet',
-        value: defaultAlphabet,
+        elements: [
+          'repeat',
+          'autokey'
+        ],
+        labels: [
+          'Repeat',
+          'Autokey'
+        ],
         randomizable: false
       },
       {
-        name: 'caseSensitivity',
-        type: 'boolean',
+        name: 'alphabet',
+        type: 'text',
+        value: defaultAlphabet,
+        uniqueChars: true,
+        minLength: 2,
+        caseSensitivity: false,
+        randomizable: false
+      },
+      {
+        name: 'caseStrategy',
+        type: 'enum',
+        value: 'maintain',
+        elements: ['maintain', 'ignore', 'strict'],
+        labels: ['Maintain case', 'Ignore case', 'Strict (A ≠ a)'],
         width: 6,
-        value: false,
         randomizable: false
       },
       {
@@ -94,10 +95,8 @@ export default class VigenereCipherEncoder extends Encoder {
         width: 6,
         value: true,
         randomizable: false,
-        options: {
-          trueLabel: 'Include',
-          falseLabel: 'Ignore'
-        }
+        trueLabel: 'Include',
+        falseLabel: 'Ignore'
       }
     ])
   }
@@ -107,14 +106,18 @@ export default class VigenereCipherEncoder extends Encoder {
    * @protected
    * @param {Chain} content
    * @param {boolean} isEncode True for encoding, false for decoding
-   * @return {number[]|string|Uint8Array|Chain|Promise} Resulting content
+   * @return {number[]|string|Uint8Array|Chain} Resulting content
    */
   performTranslate (content, isEncode) {
-    const { variant, alphabet, includeForeignChars } = this.getSettingValues()
+    const { variant, caseStrategy, includeForeignChars } =
+      this.getSettingValues()
 
-    // Handle case sensitivity
-    if (!this.getSettingValue('caseSensitivity')) {
-      content = content.toLowerCase()
+    // Prepare alphabet(s) depending on case strategy
+    let alphabet = this.getSettingValue('alphabet')
+    let uppercaseAlphabet
+    if (caseStrategy !== 'strict') {
+      alphabet = alphabet.toLowerCase()
+      uppercaseAlphabet = alphabet.toUpperCase()
     }
 
     // Choose key and key mode
@@ -124,18 +127,30 @@ export default class VigenereCipherEncoder extends Encoder {
       keyMode = 'repeat'
     }
 
-    // Translate each character
-    let j = 0
-    let resultCodePoints = []
-    let charIndex, codePoint, resultCodePoint, keyCodePoint, keyIndex
+    const inputLength = content.getLength()
+    const result = new Array(inputLength)
 
-    for (let i = 0; i < content.getLength(); i++) {
+    let charIndex, codePoint, uppercase, keyCodePoint, keyIndex
+    let j = 0
+    let k = 0
+
+    // Translate each character
+    for (let i = 0; i < inputLength; i++) {
       codePoint = content.getCodePointAt(i)
+
+      // Match alphabet character
       charIndex = alphabet.indexOfCodePoint(codePoint)
+      uppercase = false
+
+      // Match uppercase alphabet character (depending on case strategy)
+      if (charIndex === -1 && caseStrategy !== 'strict') {
+        charIndex = uppercaseAlphabet.indexOfCodePoint(codePoint)
+        uppercase = true
+      }
 
       if (charIndex !== -1) {
         // Calculate shift from key
-        keyCodePoint = key.getCodePointAt(MathUtil.mod(j, key.getLength()))
+        keyCodePoint = key.getCodePointAt(MathUtil.mod(k, key.getLength()))
         keyIndex = alphabet.indexOfCodePoint(keyCodePoint)
 
         // Shift char index depending on variant
@@ -154,25 +169,30 @@ export default class VigenereCipherEncoder extends Encoder {
               : charIndex - keyIndex
         }
 
-        // Match code point to shifted char index and add it to result
+        // Rotate char index
         charIndex = MathUtil.mod(charIndex, alphabet.getLength())
-        resultCodePoint = alphabet.getCodePointAt(charIndex)
-        resultCodePoints.push(resultCodePoint)
 
-        // Extend the key with the current character, if requested
-        if (keyMode === 'autokey') {
-          const nextKeyCodePoint = isEncode ? codePoint : resultCodePoint
-          key = Chain.join([key, Chain.wrap([nextKeyCodePoint])], '')
+        // Map char index to character following the case strategy
+        if (caseStrategy === 'maintain' && uppercase) {
+          result[j++] = uppercaseAlphabet.getCodePointAt(charIndex)
+        } else {
+          result[j++] = alphabet.getCodePointAt(charIndex)
         }
 
-        j++
+        // Extend the key with the current char index, if requested
+        if (keyMode === 'autokey') {
+          keyCodePoint = isEncode ? codePoint : alphabet.getCodePointAt(charIndex)
+          key = Chain.join([key, Chain.wrap([keyCodePoint]).toLowerCase()], '')
+        }
+
+        k++
       } else if (includeForeignChars) {
         // Add foreign character to result
-        resultCodePoints.push(codePoint)
+        result[j++] = codePoint
       }
     }
 
-    return resultCodePoints
+    return result.slice(0, j)
   }
 
   /**
@@ -190,14 +210,12 @@ export default class VigenereCipherEncoder extends Encoder {
         break
       case 'alphabet':
         // Update allowed chars of key setting
-        this.getSetting('key').setAllowedChars(value)
+        this.getSetting('key').setWhitelistChars(value)
         break
-      case 'caseSensitivity':
-        // Also set case sensitivity on alphabet and key setting
-        this.getSetting('alphabet').setCaseSensitivity(value)
-        this.getSetting('key').setCaseSensitivity(value)
+      case 'caseStrategy':
+        this.getSetting('alphabet').setCaseSensitivity(value === 'strict')
+        this.getSetting('key').setCaseSensitivity(value === 'strict')
         break
     }
-    super.settingValueDidChange(setting, value)
   }
 }

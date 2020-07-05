@@ -2,7 +2,6 @@
 import ArrayUtil from '../ArrayUtil'
 import Chain from '../Chain'
 import Field from '../Field'
-import TextEncoder from '../TextEncoder'
 import TextFieldView from '../View/Field/Text'
 
 /**
@@ -13,12 +12,15 @@ export default class TextField extends Field {
    * Constructor
    * @param {string} name Field name
    * @param {object} [spec] Field spec
-   * @param {mixed} [spec.options] Field options
-   * @param {?number} [spec.options.minLength=null] Minimum amount of characters
-   * @param {?number} [spec.options.maxLength=null] Maximum amount of characters
-   * @param {?number[]} [spec.options.allowedCodePoints=null]
-   * Restricts text to given Unicode code points.
-   * @param {boolean} [spec.options.caseSensitivity=false]
+   * @param {?number} [spec.minLength=null] Minimum amount of characters
+   * @param {?number} [spec.maxLength=null] Maximum amount of characters
+   * @param {?number[]|string|Chain} [spec.whitelistChars=null]
+   * Restricts the value to the given set of Unicode code points.
+   * @param {?number[]|string|Chain} [spec.blacklistChars=null]
+   * Forbids the given set of Unicode code points in the value.
+   * @param {boolean} [spec.uniqueChars=false]
+   * Sets wether value characters need to be unique.
+   * @param {boolean} [spec.caseSensitivity=true]
    * Wether to respect case sensitivity
    */
   constructor (name, spec = {}) {
@@ -28,14 +30,18 @@ export default class TextField extends Field {
     this._value = Chain.wrap(spec.value || null)
     this._minLength = null
     this._maxLength = null
-    this._allowedChars = null
+    this._whitelistChars = null
+    this._blacklistChars = null
+    this._uniqueChars = false
     this._caseSensitivity = null
 
-    const options = spec.options || {}
-    this.setMinLength(options.minLength || null, false)
-    this.setMaxLength(options.maxLength || null, false)
-    this.setAllowedChars(options.allowedChars || null, false)
-    this.setCaseSensitivity(options.caseSensitivity || false, false)
+    // Apply field options
+    this.setMinLength(spec.minLength !== undefined ? spec.minLength : null, false)
+    this.setMaxLength(spec.maxLength !== undefined ? spec.maxLength : null, false)
+    this.setWhitelistChars(spec.whitelistChars || null, false)
+    this.setBlacklistChars(spec.blacklistChars || null, false)
+    this.setUniqueChars(spec.uniqueChars || false, false)
+    this.setCaseSensitivity(spec.caseSensitivity !== false, false)
   }
 
   /**
@@ -83,31 +89,68 @@ export default class TextField extends Field {
   }
 
   /**
-   * Returns allowed Unicode code points.
-   * @return {?number[]} Allowed Unicode code points
+   * Returns the whitelisted Unicode code points.
+   * @return {?number[]} Whitelisted Unicode code points
    */
-  getAllowedChars () {
-    return this._allowedChars
+  getWhitelistChars () {
+    return this._whitelistChars
   }
 
   /**
-   * Restricts text to given Unicode code points.
-   * @param {?number[]|string|Chain} allowedChars
+   * Restricts the value to the given set of Unicode code points.
+   * @param {?number[]|string|Chain} whitelistChars Whitelist code points
    * @param {boolean} [revalidate=true] Wether to revalidate current value
    * @return {TextField} Fluent interface
    */
-  setAllowedChars (allowedChars, revalidate = true) {
-    if (this._allowedChars === allowedChars) {
+  setWhitelistChars (whitelistChars, revalidate = true) {
+    this._whitelistChars =
+      whitelistChars !== null
+        ? Chain.wrap(whitelistChars).getCodePoints()
+        : null
+    return revalidate ? this.revalidateValue() : this
+  }
+
+  /**
+   * Returns the blacklisted Unicode code points.
+   * @return {?number[]} Blacklisted Unicode code points
+   */
+  getBlacklistChars () {
+    return this._blacklistChars
+  }
+
+  /**
+   * Forbids the given set of Unicode code points in the value.
+   * @param {?number[]|string|Chain} blacklistChars Blacklist code points
+   * @param {boolean} [revalidate=true] Wether to revalidate current value
+   * @return {TextField} Fluent interface
+   */
+  setBlacklistChars (blacklistChars, revalidate = true) {
+    this._blacklistChars =
+      blacklistChars !== null
+        ? Chain.wrap(blacklistChars).getCodePoints()
+        : null
+    return revalidate ? this.revalidateValue() : this
+  }
+
+  /**
+   * Wether value characters need to be unique.
+   * @return {boolean}
+   */
+  isUniqueChars () {
+    return this._uniqueChars
+  }
+
+  /**
+   * Sets wether value characters need to be unique.
+   * @param {boolean} uniqueChars Character uniqueness
+   * @param {boolean} [revalidate=true] Wether to revalidate current value
+   * @return {TextField} Fluent interface
+   */
+  setUniqueChars (uniqueChars, revalidate = true) {
+    if (this._uniqueChars === uniqueChars) {
       return this
     }
-
-    if (typeof allowedChars === 'string') {
-      allowedChars = TextEncoder.codePointsFromString(allowedChars)
-    } else if (allowedChars instanceof Chain) {
-      allowedChars = allowedChars.getCodePoints()
-    }
-
-    this._allowedChars = allowedChars
+    this._uniqueChars = uniqueChars
     return revalidate ? this.revalidateValue() : this
   }
 
@@ -168,27 +211,41 @@ export default class TextField extends Field {
       }
     }
 
-    // Validate allowed chars
-    if (this._allowedChars !== null) {
-      let invalidCharacters = []
+    // Validate character uniqueness
+    if (this._uniqueChars && !ArrayUtil.isUnique(value.getCodePoints())) {
+      return {
+        key: 'textCharactersNotUnique',
+        message: `The value must not contain duplicate characters`
+      }
+    }
+
+    // Validate character whitelist and blacklist
+    if (this._whitelistChars !== null || this._blacklistChars !== null) {
+      let whitelist = this._whitelistChars
+      let blacklist = this._blacklistChars
+      let invalidChars = []
+      let c
+
       for (let i = 0; i < value.getLength(); i++) {
-        if (this._allowedChars.indexOf(value.getCodePointAt(i)) === -1) {
-          invalidCharacters.push(value.getCharAt(i))
+        c = value.getCodePointAt(i)
+        if ((whitelist !== null && whitelist.indexOf(c) === -1) ||
+            (blacklist !== null && blacklist.indexOf(c) !== -1)) {
+          invalidChars.push(value.getCharAt(i))
         }
       }
 
-      if (invalidCharacters.length > 0) {
-        invalidCharacters = ArrayUtil.unique(invalidCharacters)
+      if (invalidChars.length > 0) {
+        invalidChars = ArrayUtil.unique(invalidChars)
         return {
-          key: 'textNotAllowedCharacter',
+          key: 'textForbiddenCharacter',
           message:
-            `The value contains characters that are not allowed: ` +
-            `'${invalidCharacters.join('')}'`
+            `The value contains forbidden characters: ` +
+            `'${invalidChars.join('')}'`
         }
       }
     }
 
-    return super.validateValue(rawValue)
+    return super.validateValue(value)
   }
 
   /**
@@ -214,15 +271,21 @@ export default class TextField extends Field {
     if (value !== null) {
       return value
     }
-    if (this.isValid() && this.getAllowedChars() !== null) {
-      // Use the current value's length to
-      // produce the same amount of random chars
-      const length = this.getValue().getLength()
-      const codePoints = []
-      for (let i = 0; i < length; i++) {
-        codePoints.push(random.nextChoice(this.getAllowedChars()))
+    if (this.isValid()) {
+      if (this.isUniqueChars()) {
+        // Shuffle the characters of the current value
+        const codePoints = this.getValue().getCodePoints()
+        return Chain.wrap(ArrayUtil.shuffle(codePoints, random))
+      } else if (this.getWhitelistChars() !== null) {
+        // Use the current value's length to
+        // produce the same amount of random chars
+        const length = this.getValue().getLength()
+        const codePoints = []
+        for (let i = 0; i < length; i++) {
+          codePoints.push(random.nextChoice(this.getWhitelistChars()))
+        }
+        return Chain.wrap(codePoints)
       }
-      return Chain.wrap(codePoints)
     }
     return null
   }
@@ -254,9 +317,8 @@ export default class TextField extends Field {
    * @protected
    * @param {TextFieldView} view
    * @param {mixed} value
-   * @return {TextField} Fluent interface
    */
   viewValueDidChange (view, value) {
-    return this.setValue(value, view)
+    this.setValue(value, view)
   }
 }

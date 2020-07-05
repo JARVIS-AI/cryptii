@@ -29,35 +29,37 @@ export default class Chain {
     this._bytes = null
     this._encoding = encoding
 
-    const valueType = Object.prototype.toString.call(value)
-    switch (valueType) {
-      case '[object Null]':
-        // initializes empty chain
-        this._codePoints = []
-        this._string = ''
-        this._bytes = new Uint8Array(0)
-        break
-      case '[object Array]':
-        // validate array of code points
-        if (!TextEncoder.validateCodePoints(value)) {
+    if (value === null) {
+      // Initializes empty chain
+      this._codePoints = []
+      this._string = ''
+      this._bytes = new Uint8Array(0)
+    } else {
+      // Initialize depending on value type
+      const valueType = Object.prototype.toString.call(value)
+      switch (valueType) {
+        case '[object Array]':
+          // Validate array of code points
+          if (!TextEncoder.validateCodePoints(value)) {
+            throw new Error(
+              `Chain constructor expects a valid array of code points.`)
+          }
+          // Initializes chain with code points
+          this._codePoints = value
+          break
+        case '[object String]':
+          // Initializes chain with a string
+          this._string = value
+          break
+        case '[object Uint8Array]':
+          // Initializes chain with bytes
+          this._bytes = value
+          break
+        default:
           throw new Error(
-            `Chain constructor expects a valid array of code points.`)
-        }
-        // initializes chain with code points
-        this._codePoints = value
-        break
-      case '[object String]':
-        // initializes chain with a string
-        this._string = value
-        break
-      case '[object Uint8Array]':
-        // initializes chain with bytes
-        this._bytes = value
-        break
-      default:
-        throw new Error(
-          `Chain constructor expects one optional parameter of type ` +
-          `Array, String or Uint8Array. Received unexpected ${valueType}.`)
+            `Chain constructor expects one optional parameter of type ` +
+            `Array, String or Uint8Array. Received unexpected ${valueType}.`)
+      }
     }
   }
 
@@ -176,8 +178,9 @@ export default class Chain {
    * @return {Chain[]}
    */
   split (separator = undefined, limit = undefined) {
+    separator = separator instanceof Chain ? separator.toString() : separator
     return this.getString()
-      .split(separator ? separator.toString() : undefined, limit)
+      .split(separator, limit)
       .map(stringPart => Chain.wrap(stringPart, this._encoding))
   }
 
@@ -210,6 +213,27 @@ export default class Chain {
     return this.getLength() > length
       ? Chain.wrap(this.substr(0, length).getString() + '…', this._encoding)
       : this
+  }
+
+  /**
+   * Creates a mixed alphabet by extending this chain by the given one.
+   * @param {number[]|string|Uint8Array|Chain} alphabet Alphabet the target
+   * should be extended by.
+   * @return {Chain} Mixed alphabet
+   */
+  extend (alphabet) {
+    const key = this.getCodePoints()
+    const codePoints = Chain.wrap(alphabet).getCodePoints()
+    const mixedAlphabet = key.slice()
+    let element
+    let i = 0
+    while (mixedAlphabet.length < codePoints.length && i < codePoints.length) {
+      element = codePoints[i++]
+      if (key.indexOf(element) === -1) {
+        mixedAlphabet.push(element)
+      }
+    }
+    return Chain.wrap(mixedAlphabet)
   }
 
   /**

@@ -1,6 +1,8 @@
 
 import View from '../View'
 
+import closeIcon from '../../assets/icons/close.svg'
+
 /**
  * Modal view
  */
@@ -77,11 +79,11 @@ export default class ModalView extends View {
         setTimeout(this.visibilityDidChange.bind(this, visible, cancelled), 100)
       }, { once: true })
 
-      // Trigger modal transition
-      document.body.classList.toggle('modal-visible', visible)
-      $element.classList.toggle('modal--visible', visible)
-
       if (visible) {
+        // Trigger modal transition
+        document.body.classList.add('modal-visible')
+        $element.classList.add('modal--visible')
+
         // Set dialog height to transition to
         this._$dialog.style.height = `${dialogHeight}px`
 
@@ -89,6 +91,10 @@ export default class ModalView extends View {
         this._keyUpHandler &&
           document.addEventListener('keyup', this._keyUpHandler)
       } else {
+        // Trigger modal transition
+        document.body.classList.remove('modal-visible')
+        $element.classList.remove('modal--visible')
+
         // Set dialog height to transition to
         this._$dialog.style.height = '0px'
 
@@ -272,20 +278,22 @@ export default class ModalView extends View {
    * @return {HTMLElement}
    */
   renderHeader () {
+    const $closeButton = View.createElement('button', {
+      className: 'modal__btn-close',
+      onClick: evt => {
+        evt.preventDefault()
+        this.cancel()
+      }
+    })
+    $closeButton.innerHTML = closeIcon
+
     return View.createElement('header', {
       className: 'modal__header'
     }, [
       View.createElement('span', {
         className: 'modal__title'
       }, this._title),
-      View.createElement('a', {
-        className: 'modal__btn-close',
-        href: '#',
-        onClick: evt => {
-          evt.preventDefault()
-          this.cancel()
-        }
-      }, 'Cancel')
+      $closeButton
     ])
   }
 

@@ -21,6 +21,13 @@ export default class Pipe extends Viewable {
     super()
     this._viewPrototype = PipeView
     this._brickFactory = null
+    this._service = null
+
+    // Meta
+    this._id = null
+    this._url = null
+    this._title = null
+    this._description = null
 
     // Empty array of bricks and brick state objects
     this._bricks = []
@@ -33,6 +40,78 @@ export default class Pipe extends Viewable {
 
     // Lazily instantiated library modal view
     this._libraryModalView = null
+  }
+
+  /**
+   * Returns the id.
+   * @return {number}
+   */
+  getId () {
+    return this._id
+  }
+
+  /**
+   * Sets the id.
+   * @param {number} id
+   * @return {Pipe} Fluent interface
+   */
+  setId (id) {
+    this._id = id
+    return this
+  }
+
+  /**
+   * Returns the URL.
+   * @return {string}
+   */
+  getUrl () {
+    return this._url
+  }
+
+  /**
+   * Sets the url.
+   * @param {string} url
+   * @return {Pipe} Fluent interface
+   */
+  setUrl (url) {
+    this._url = url
+    return this
+  }
+
+  /**
+   * Returns the title.
+   * @return {string|null}
+   */
+  getTitle () {
+    return this._title
+  }
+
+  /**
+   * Sets the title.
+   * @param {string|null} title Pipe title
+   * @return {Pipe} Fluent interface
+   */
+  setTitle (title) {
+    this._title = title
+    return this
+  }
+
+  /**
+   * Returns the description.
+   * @return {string|null}
+   */
+  getDescription () {
+    return this._description
+  }
+
+  /**
+   * Sets the description.
+   * @param {string|null} description Pipe description
+   * @return {Pipe} Fluent interface
+   */
+  setDescription (description) {
+    this._description = description
+    return this
   }
 
   /**
@@ -54,6 +133,23 @@ export default class Pipe extends Viewable {
   }
 
   /**
+   * Returns the service instance.
+   * @return {Service|null}
+   */
+  getService () {
+    return this._service
+  }
+
+  /**
+   * Sets the service instance.
+   * @param {Service} service Service instance
+   */
+  setService (service) {
+    this._service = service
+    return this
+  }
+
+  /**
    * Returns a lazily instantiated library modal view instance.
    * @return {ModalView} Library modal view
    */
@@ -63,6 +159,14 @@ export default class Pipe extends Viewable {
       this._libraryModalView = new LibraryModalView(library)
     }
     return this._libraryModalView
+  }
+
+  /**
+   * Returns the number of bricks.
+   * @return {number}
+   */
+  getLength () {
+    return this._bricks.length
   }
 
   /**
@@ -353,6 +457,14 @@ export default class Pipe extends Viewable {
   }
 
   /**
+   * Returns the number of buckets.
+   * @return {number}
+   */
+  getBucketLength () {
+    return this._bucketContent.length
+  }
+
+  /**
    * Returns content of given bucket.
    * @param {number} [bucket=0] Bucket index
    * @param {boolean} [waitForCompletion=true] If set to true, the value is
@@ -411,28 +523,8 @@ export default class Pipe extends Viewable {
    * @return {Pipe} Fluent interface
    */
   _propagateContent (bucket, senderOrIsForward = null) {
-    // Collect bricks that are attached to this bucket
-    let lowerEncoder = null
-    let upperEncoder = null
-    const viewers = []
-
-    let encoderCount = 0
-    let i = -1
-    while (++i < this._bricks.length && encoderCount <= bucket) {
-      let brick = this._bricks[i]
-      if (brick instanceof Encoder) {
-        if (encoderCount === bucket - 1) {
-          lowerEncoder = brick
-        } else if (encoderCount === bucket) {
-          upperEncoder = brick
-        }
-        encoderCount++
-      } else {
-        if (encoderCount === bucket) {
-          viewers.push(brick)
-        }
-      }
-    }
+    const { lowerEncoder, upperEncoder, viewers } =
+      this.getBricksAttachedToBucket(bucket)
 
     // Trigger viewer views
     viewers
@@ -660,6 +752,40 @@ export default class Pipe extends Viewable {
   }
 
   /**
+   * Returns an object containing the lower and upper encoder as well as the
+   * viewers attached to the given bucket.
+   * @param {number} bucket
+   * @return {object}
+   */
+  getBricksAttachedToBucket (bucket) {
+    let lowerEncoder = null
+    let upperEncoder = null
+    const viewers = []
+
+    let encoderCount = 0
+    let i = -1
+    let brick
+
+    while (++i < this._bricks.length && encoderCount <= bucket) {
+      brick = this._bricks[i]
+      if (brick instanceof Encoder) {
+        if (encoderCount === bucket - 1) {
+          lowerEncoder = brick
+        } else if (encoderCount === bucket) {
+          upperEncoder = brick
+        }
+        encoderCount++
+      } else {
+        if (encoderCount === bucket) {
+          viewers.push(brick)
+        }
+      }
+    }
+
+    return { lowerEncoder, upperEncoder, viewers }
+  }
+
+  /**
    * Delegate method triggered by child viewers if their content changed.
    * @protected
    * @param {Viewer} viewer Sender viewer
@@ -704,7 +830,7 @@ export default class Pipe extends Viewable {
     if (brick instanceof Encoder) {
       // Trigger encode or decode depending on location of the selected bucket
       const lowerBucket = this.getBucketIndexForBrick(brick)
-      const isEncode = this._selectedBucket > lowerBucket
+      const isEncode = this._selectedBucket <= lowerBucket
       this._triggerEncoderTranslation(brick, isEncode)
     } else {
       // Trigger view
@@ -763,7 +889,9 @@ export default class Pipe extends Viewable {
    * @param {Brick} brick
    */
   async brickReplaceButtonDidClick (brick) {
+    // Show only bricks of the same type in the modal view
     const modalView = this.getLibraryModalView()
+    modalView.applyFilter(brickMeta => brickMeta.type === brick.getMeta().type)
 
     // Ignore event when library modal view is already visible
     if (modalView.isVisible()) {
@@ -799,9 +927,9 @@ export default class Pipe extends Viewable {
     // Track action
     EventManager.trigger('pipeAddButtonClick', { pipe: this, index })
 
-    // Build modal
-    const factory = this.getBrickFactory()
-    const modalView = new LibraryModalView(factory.getLibrary())
+    // Offer all bricks in the modal view
+    const modalView = this.getLibraryModalView()
+    modalView.clearFilter()
 
     let name
     try {
@@ -812,7 +940,7 @@ export default class Pipe extends Viewable {
     }
 
     // Create brick and add it to the pipe
-    const brick = factory.create(name)
+    const brick = this.getBrickFactory().create(name)
     this.spliceBricks(index, 0, [brick])
   }
 
@@ -860,39 +988,61 @@ export default class Pipe extends Viewable {
   }
 
   /**
+   * Stores this pipe using the backend service.
+   * @return {string} Pipe URL
+   */
+  async store () {
+    const data = await this.getService().storePipe(this)
+    return data.url
+  }
+
+  /**
    * Serializes pipe to make it JSON serializable
    * @return {mixed} Structured data.
    */
   serialize () {
-    // Get selected bucket and content
-    const contentBucket = this._selectedBucket
-    const contentChain = this._bucketContent[contentBucket]
+    const data = {}
 
-    // Serialize content
-    let content, contentEncoding
-    if (!contentChain.needsTextEncoding()) {
-      content = contentChain.getString()
-      contentEncoding = 'text'
-    } else {
-      content = ByteEncoder.base64StringFromBytes(contentChain.getBytes())
-      contentEncoding = 'base64'
+    // Pipe meta
+    if (this._id !== null) {
+      data.id = this._id
+    }
+    if (this._url !== null) {
+      data.url = this._url
+    }
+    if (this._title !== null) {
+      data.title = this._title
+    }
+    if (this._description !== null) {
+      data.description = this._description
     }
 
-    // Serialize bricks
-    const bricks = this._bricks.map(brick => brick.serialize())
+    // Items
+    data.items = this._bricks.map(brick => brick.serialize())
 
-    // Compose pipe object
-    const pipe = { bricks, content }
+    // Content
+    const bucket = this._selectedBucket
+    const content = this._bucketContent[bucket]
 
-    // Add optional attributes
-    if (contentBucket !== 0) {
-      pipe.contentBucket = contentBucket
+    if (!content.isEmpty() || bucket > 0) {
+      data.content = {}
+
+      // Encode content data
+      if (!content.needsTextEncoding()) {
+        data.content.data = content.getString()
+      } else {
+        data.content.data = ByteEncoder.base64StringFromBytes(content.getBytes())
+        data.content.encoding = 'base64'
+      }
+
+      // Calculate content injection index
+      const { lowerEncoder } = this.getBricksAttachedToBucket(bucket)
+      if (lowerEncoder !== null) {
+        data.content.index = this._bricks.indexOf(lowerEncoder) + 1
+      }
     }
-    if (contentEncoding !== 'text') {
-      pipe.contentEncoding = contentEncoding
-    }
 
-    return pipe
+    return data
   }
 
   /**
@@ -903,62 +1053,119 @@ export default class Pipe extends Viewable {
    * @return {Pipe} Extracted pipe
    */
   static extract (data, brickFactory) {
-    // Verify bricks
-    if (!Array.isArray(data.bricks)) {
-      throw new Error(`Can't extract bricks from structured data.`)
-    }
-
-    // Verify content bucket
-    if (typeof data.contentBucket !== 'undefined' &&
-        typeof data.contentBucket !== 'number') {
+    // Verify items
+    if (!Array.isArray(data.items) || data.items.length === 0) {
       throw new Error(
-        `Malformed pipe data: ` +
-        `Optional attribute 'contentBucket' is expected to be a number.`)
+        `Pipe property 'items' is expected to be of type 'array' ` +
+        `and must not be empty`)
     }
 
-    // Verify content encoding
-    if (typeof data.contentEncoding !== 'undefined' &&
-        typeof data.contentEncoding !== 'string') {
-      throw new Error(
-        `Malformed pipe data: ` +
-        `Optional attribute 'contentEncoding' is expected to be a string.`)
-    }
-
-    // Verify content
-    if (typeof data.content !== 'string') {
-      throw new Error(
-        `Malformed pipe data: Attribute 'content' is expected to be a string.`)
-    }
-
-    // Extract content bucket
-    const bucket = data.contentBucket !== undefined ? data.contentBucket : 0
-
-    // Extract content encoding
-    const contentEncoding =
-      data.contentEncoding !== undefined
-        ? data.contentEncoding
-        : 'text'
-
-    // Extract content
-    let content
-    switch (contentEncoding) {
-      case 'text':
-        content = data.content
-        break
-      case 'base64':
-        content = ByteEncoder.bytesFromBase64String(data.content)
-        break
-      default:
-        throw new Error(
-          `Malformed pipe data: ` +
-          `Content encoding '${contentEncoding}' is not supported.`)
-    }
-
-    // Compose pipe
+    // Create pipe instance
     const pipe = new Pipe()
     pipe.setBrickFactory(brickFactory)
-    pipe.addBricks(data.bricks)
+    pipe.addBricks(data.items)
+
+    // Handle id property
+    if (data.id !== undefined && data.id !== null) {
+      if (typeof data.id !== 'number') {
+        throw new Error(
+          `Optional pipe property 'id' is expected to be of type 'number'`)
+      }
+      pipe.setId(data.id)
+    }
+
+    // Handle url property
+    if (data.url !== undefined && data.url !== null) {
+      if (typeof data.url !== 'string') {
+        throw new Error(
+          `Optional pipe property 'url' is expected to be of type 'string'`)
+      }
+      pipe.setUrl(data.url)
+    }
+
+    // Handle title property
+    if (data.title !== undefined && data.title !== null) {
+      if (typeof data.title !== 'string') {
+        throw new Error(
+          `Optional pipe property 'title' is expected to be of type 'string'`)
+      }
+      pipe.setTitle(data.title)
+    }
+
+    // Handle description property
+    if (data.description !== undefined && data.description !== null) {
+      if (typeof data.description !== 'string') {
+        throw new Error(
+          `Optional pipe property 'description' is expected to be of ` +
+          `type 'string'`)
+      }
+      pipe.setDescription(data.description)
+    }
+
+    // Handle content property
+    let content = ''
+    let bucket = 0
+
+    if (data.content !== undefined && data.content !== null) {
+      if (typeof data.content !== 'object') {
+        throw new Error(
+          `Optional pipe property 'content' is expected to be of type 'object'`)
+      }
+
+      if (data.content.data === undefined ||
+          typeof data.content.data !== 'string') {
+        throw new Error(
+          `Pipe property 'content.data' is expected to be of type 'string'`)
+      }
+
+      if (data.content.encoding !== undefined &&
+          typeof data.content.encoding !== 'string') {
+        throw new Error(
+          `Optional pipe property 'content.encoding' is expected to be of ` +
+          `type 'string'`)
+      }
+
+      if (data.content.index !== undefined &&
+          typeof data.content.index !== 'number') {
+        throw new Error(
+          `Optional pipe property 'content.index' is expected to be of ` +
+          `type 'number'`)
+      }
+
+      // Decode content
+      const contentEncoding = data.content.encoding || 'text'
+      switch (contentEncoding) {
+        case 'text':
+          content = data.content.data
+          break
+        case 'base64':
+          content = ByteEncoder.bytesFromBase64String(data.content.data)
+          break
+        default:
+          throw new Error(
+            `Optional pipe property 'content.encoding' is set to an unsupported ` +
+            `encoding '${contentEncoding}'; Supported values: text, base64`)
+      }
+
+      // Inject content into pipe
+      const contentIndex = data.content.index || 0
+      if (contentIndex === pipe.getLength()) {
+        // Handle content injection at the very end of the pipe
+        bucket = pipe.getBucketLength() - 1
+      } else if (contentIndex >= 0 && contentIndex < pipe.getLength()) {
+        // Handle content injection before the given brick
+        bucket = pipe.getBucketIndexForBrick(pipe.getBrick(contentIndex))
+      } else {
+        // Out of range error
+        throw new Error(
+          `Optional pipe property 'content.index' is expected to be a number ` +
+          `ranging from 0 to ${pipe.getBucketLength() - 1}`)
+      }
+    }
+
+    // Inject content
     pipe.setContent(content, bucket)
+
     return pipe
   }
 }

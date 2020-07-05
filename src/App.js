@@ -1,11 +1,28 @@
 
+/* globals CRYPTII_VERSION */
+
 import AppView from './View/App'
 import BrickFactory from './Factory/Brick'
-import Browser from './Browser'
+import EnvUtil from './EnvUtil'
 import Pipe from './Pipe'
+import Service from './Service'
 import Viewable from './Viewable'
 
-// singleton instance
+/**
+ * Config defaults
+ * @type {object}
+ */
+const defaultConfig = {
+  version: CRYPTII_VERSION,
+  scope: '/',
+  serviceEndpoint: 'https://cryptii.com/api',
+  serviceWorkerUrl: null
+}
+
+/**
+ * Singleton instance
+ * @type {App}
+ */
 let instance = null
 
 /**
@@ -13,33 +30,87 @@ let instance = null
  */
 export default class App extends Viewable {
   /**
-   * Application constructor
+   * Constructor
+   * @param {object} [localConfig={}] Local app configuration
    */
-  constructor () {
+  constructor (localConfig = {}) {
     super()
     this._viewPrototype = AppView
     this._pipe = null
+
+    // Merge config
+    this._config = Object.assign(defaultConfig, localConfig)
+
+    // Configure service instance
+    this._service = new Service(this._config.serviceEndpoint)
+
+    // Keep a reference to this instance
+    instance = this
   }
 
   /**
    * Bootstraps the application.
+   * @param {?object} [pipeData=null] Initial pipe data
    * @return {App} Fluent interface
    */
-  run () {
-    // apply browser class name
-    Browser.applyClassName()
+  run (pipeData = null) {
+    // Place browser attribute
+    EnvUtil.placeBrowserAttribute()
 
-    // read pipe data
-    const $pipeData = document.querySelector('.app .app__pipe .pipe__data')
-    const pipeData = JSON.parse($pipeData.innerHTML)
-    this._pipe = Pipe.extract(pipeData, BrickFactory.getInstance())
+    // Create and configure pipe instance
+    if (pipeData !== null) {
+      this._pipe = Pipe.extract(pipeData, BrickFactory.getInstance())
+    } else {
+      this._pipe = new Pipe()
+      this._pipe.setBrickFactory(BrickFactory.getInstance())
+    }
 
-    // trigger view creation and initial layout
+    // Configure pipe service
+    this._pipe.setService(this._service)
+
+    // Trigger view creation and initial layout
     const view = this.getView()
     view.layout()
     setTimeout(view.layout.bind(view), 100)
 
+    // Configure service worker, if supported
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      if (this._config.serviceWorkerUrl) {
+        // Register the service worker
+        navigator.serviceWorker.register(this._config.serviceWorkerUrl, {
+          scope: this._config.scope
+        })
+      } else {
+        // Unregister existing service workers
+        navigator.serviceWorker.getRegistrations().then(registrations =>
+          registrations.forEach(registration => registration.unregister()))
+      }
+    }
+
+    // Listen for the debug shortcut `Ctrl+I`
+    if (EnvUtil.isBrowser()) {
+      document.addEventListener('keydown', evt => {
+        if (evt.ctrlKey && evt.key === 'i') {
+          evt.preventDefault()
+          alert(this.debug())
+        }
+      })
+    }
+
     return this
+  }
+
+  /**
+   * Composes a JSON string containing debug information about the current app
+   * state useful for bug reports.
+   * @return {string}
+   */
+  debug () {
+    return JSON.stringify({
+      version: this._config.version,
+      env: EnvUtil.identify(),
+      pipe: this.getPipe().serialize(),
+    })
   }
 
   /**
@@ -56,7 +127,7 @@ export default class App extends Viewable {
    * @param {View} view
    */
   didCreateView (view) {
-    // add pipe subview
+    // Add pipe subview
     view.addSubview(this._pipe.getView())
   }
 
@@ -65,9 +136,6 @@ export default class App extends Viewable {
    * @return {App}
    */
   static getInstance () {
-    if (instance === null) {
-      instance = new App()
-    }
     return instance
   }
 }

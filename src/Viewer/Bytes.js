@@ -36,17 +36,9 @@ export default class BytesViewer extends Viewer {
         type: 'enum',
         width: 6,
         value: 'hexadecimal',
-        randomizable: false,
-        options: {
-          elements: [
-            'hexadecimal',
-            'binary'
-          ],
-          labels: [
-            'Hexadecimal',
-            'Binary'
-          ]
-        }
+        elements: ['hexadecimal', 'binary'],
+        labels: ['Hexadecimal', 'Binary'],
+        randomizable: false
       },
       {
         name: 'groupBits',
@@ -54,17 +46,18 @@ export default class BytesViewer extends Viewer {
         type: 'enum',
         width: 6,
         value: 8,
-        randomizable: false,
-        options: {
-          elements: [null, 4, 8, 16, 32],
-          labels: [
-            'None',
-            'Half-byte',
-            'Byte',
-            '2 Bytes',
-            '4 Bytes'
-          ]
-        }
+        elements: [null, 4, 5, 6, 8, 16, 24, 32],
+        labels: [
+          'None',
+          '4 Bits',
+          '5 Bits',
+          '6 Bits',
+          'Byte',
+          '2 Bytes',
+          '3 Bytes',
+          '4 Bytes'
+        ],
+        randomizable: false
       }
     ])
   }
@@ -128,5 +121,36 @@ export default class BytesViewer extends Viewer {
       }
       this.contentDidChange(Chain.wrap(bytes))
     })
+  }
+
+  /**
+   * Triggered when a setting field has changed.
+   * @protected
+   * @param {Field} setting Sender setting field
+   * @param {mixed} value New field value
+   */
+  settingValueDidChange (setting, value) {
+    if (setting.getName() === 'groupBits') {
+      const formatSetting = this.getSetting('format')
+
+      // Compose format options
+      const formatNames = ['binary']
+      const formatLabels = ['Binary']
+
+      // The hexadecimal format is only available
+      // if bits are grouped by multiples of 4
+      if (value === null || value % 4 === 0) {
+        formatNames.push('hexadecimal')
+        formatLabels.push('Hexadecimal')
+      }
+
+      // Switch format if it is no longer available
+      if (formatNames.indexOf(formatSetting.getValue()) === -1) {
+        formatSetting.setValue(formatNames[0])
+      }
+
+      // Update format selection
+      formatSetting.setElements(formatNames, formatLabels)
+    }
   }
 }

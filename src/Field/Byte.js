@@ -8,12 +8,11 @@ import Field from '../Field'
  */
 export default class ByteField extends Field {
   /**
-   * Field constructor
+   * Constructor
    * @param {string} name Field name
    * @param {Object} [spec] Field spec
-   * @param {mixed} [spec.options] Field options
-   * @param {?number} [spec.options.minSize=null] Minimum size in bytes
-   * @param {?number} [spec.options.maxSize=null] Maximum size in bytes
+   * @param {?number} [spec.minSize=null] Minimum size in bytes
+   * @param {?number} [spec.maxSize=null] Maximum size in bytes
    */
   constructor (name, spec = {}) {
     super(name, spec)
@@ -22,10 +21,10 @@ export default class ByteField extends Field {
     this._value = spec.value || new Uint8Array()
     this._minSize = null
     this._maxSize = null
+    this._randomizeSize = spec.randomizeSize || null
 
-    const options = spec.options || {}
-    this.setMinSize(options.minSize || null, false)
-    this.setMaxSize(options.maxSize || null, false)
+    this.setMinSize(spec.minSize || null, false)
+    this.setMaxSize(spec.maxSize || null, false)
   }
 
   /**
@@ -121,7 +120,10 @@ export default class ByteField extends Field {
     if (value !== null) {
       return value
     }
-    if (this.getMinSize() !== null) {
+    if (this._randomizeSize !== null) {
+      // Use randomize size
+      return random.nextBytes(this._randomizeSize)
+    } else if (this.getMinSize() !== null) {
       // Use the min size
       return random.nextBytes(this.getMinSize())
     } else if (this.isValid()) {
@@ -162,9 +164,8 @@ export default class ByteField extends Field {
    * @protected
    * @param {TextFieldView} view
    * @param {mixed} value
-   * @return {TextField} Fluent interface
    */
   viewValueDidChange (view, value) {
-    return this.setValue(value, view)
+    this.setValue(value, view)
   }
 }

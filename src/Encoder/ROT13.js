@@ -4,7 +4,7 @@ import Encoder from '../Encoder'
 const meta = {
   name: 'rot13',
   title: 'ROT13',
-  category: 'Substitution cipher',
+  category: 'Ciphers',
   type: 'encoder'
 }
 
@@ -29,22 +29,20 @@ export default class ROT13Encoder extends Encoder {
       name: 'variant',
       type: 'enum',
       value: 'rot13',
+      elements: [
+        'rot5',
+        'rot13',
+        'rot18',
+        'rot47'
+      ],
+      labels: [
+        'ROT5 (0-9)',
+        'ROT13 (A-Z, a-z)',
+        'ROT18 (0-9, A-Z, a-z)',
+        'ROT47 (!-~)'
+      ],
       randomizable: false,
-      style: 'radio',
-      options: {
-        elements: [
-          'rot5',
-          'rot13',
-          'rot18',
-          'rot47'
-        ],
-        labels: [
-          'ROT5 (0-9)',
-          'ROT13 (A-Z, a-z)',
-          'ROT18 (0-9, A-Z, a-z)',
-          'ROT47 (!-~)'
-        ]
-      }
+      style: 'radio'
     })
   }
 
